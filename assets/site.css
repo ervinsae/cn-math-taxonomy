@@ -374,6 +374,7 @@ body:not(.page-explore) .site-header {
   max-width: 100%;
 }
 .site-footer p { margin: 0; overflow-wrap: anywhere; }
+.site-footer p + p { margin-top: 6px; }
 .site-footer a { color: var(--brand-strong); font-weight: 700; }
 
 button, .btn {

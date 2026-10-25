@@ -1,7 +1,8 @@
 /* 诊断结果分享图：canvas 竖图，系统字体，二维码用本地 qrcode-generator 绘制。 */
 (function (global) {
   'use strict';
-  var SHARE_URL = 'https://math.pansgo.com/?from=share';
+  // 以脚本所在目录定位站点根路径，兼容正式域名、预览域名和子目录部署。
+  var SHARE_URL = new URL('../?from=share', global.document.currentScript.src).href;
   var W = 1080;
   var H = 1920;
   var FONT = '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", sans-serif';
