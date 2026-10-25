@@ -21,6 +21,7 @@
  *      八年级上册英语整册诊断截 45–46。高中英语「虚拟语气」截 51–52，
  *      选择性必修第一册英语整册诊断截 53–54。
  * 环境变量：CHROME=/path/to/chrome  PORT=8765  DEBUG_PORT=9333
+ *   SITE_ROOT=dist SCREENSHOT_DIR=/tmp/cnm-qa；BASE_URL=https://example.vercel.app 可验证线上站点。
  */
 'use strict';
 const { spawn } = require('child_process');
@@ -32,13 +33,13 @@ const http = require('http');
 const zlib = require('zlib');
 const E = require('../diagnose/engine.js');
 const jsQR = require('./vendor/jsQR.js');
-const SHARE_URL = 'https://math.pansgo.com/?from=share';
-
 const ROOT = path.join(__dirname, '..');
-const OUT = path.join(ROOT, 'screenshots');
+const SITE_ROOT = process.env.SITE_ROOT ? path.resolve(process.env.SITE_ROOT) : ROOT;
+const OUT = process.env.SCREENSHOT_DIR ? path.resolve(process.env.SCREENSHOT_DIR) : path.join(ROOT, 'screenshots');
 const PORT = parseInt(process.env.PORT || '8765', 10);
 const DEBUG_PORT = parseInt(process.env.DEBUG_PORT || '9333', 10);
-const BASE = 'http://127.0.0.1:' + PORT;
+const BASE = (process.env.BASE_URL || 'http://127.0.0.1:' + PORT).replace(/\/$/, '');
+const SHARE_URL = BASE + '/?from=share';
 
 // 引擎是确定性的：在 Node 里用同一个 seed 预先算出浏览器里会出现哪道题
 const DATA = path.join(ROOT, 'data');
@@ -326,7 +327,7 @@ async function main() {
   fs.mkdirSync(OUT, { recursive: true });
   const chromePath = findChrome();
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'cnm-chrome-'));
-  const server = spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '127.0.0.1'], { cwd: ROOT, stdio: 'ignore' });
+  const server = process.env.BASE_URL ? null : spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '127.0.0.1'], { cwd: SITE_ROOT, stdio: 'ignore' });
   const chrome = spawn(chromePath, [
     '--headless=new', '--remote-debugging-port=' + DEBUG_PORT, '--user-data-dir=' + profile,
     '--window-size=1280,900', '--hide-scrollbars', '--no-first-run', '--no-default-browser-check',
@@ -386,7 +387,7 @@ async function main() {
       const y = selector ? await evalJs('Math.max(0, document.querySelector(' + JSON.stringify(selector) + ').getBoundingClientRect().top + window.scrollY - 12)') : 0;
       const r = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: beyond, clip: { x: 0, y: beyond ? y : 0, width: viewW, height: clipH || viewH, scale: 1 } });
       fs.writeFileSync(path.join(OUT, file), Buffer.from(r.data, 'base64'));
-      console.log('  截图 screenshots/' + file);
+      console.log('  截图 ' + path.join(OUT, file));
     };
     const overflowOf = () => evalJs('(() => { const doc = document.documentElement; const sw = Math.max(doc.scrollWidth, document.body ? document.body.scrollWidth : 0); return { sw: sw, cw: doc.clientWidth, ok: sw <= doc.clientWidth + 1 }; })()');
     const assetsOf = () => evalJs(LOCAL_ASSET_EXPR);
@@ -627,7 +628,7 @@ async function main() {
     await waitFor(() => evalJs('document.getElementById("n-topics") && document.getElementById("n-topics").textContent !== "…" && document.querySelectorAll("a.grade-card").length === ' + N_GRADE_CARDS), '首页统计');
     const stats = await evalJs('[document.getElementById("n-topics").textContent, document.getElementById("n-edges").textContent, document.getElementById("n-questions").textContent, document.getElementById("n-standards").textContent].join(",")');
     check(stats === [N_TOPICS, N_EDGES, N_QUESTIONS, N_STANDARDS].join(','), '首页统计来自数据文件（' + stats + '）');
-    check(!(await evalJs('document.body.innerText')).includes('未经教师审核') && !(await evalJs('document.title')).includes('草稿'), '页脚不含初稿声明，标题不含「草稿」');
+    check((await evalJs('document.querySelector(".site-footer").textContent')).includes('未经教师审核') && (await evalJs('document.querySelector(".site-footer").textContent')).includes('CC BY-NC 4.0'), '页脚保留 AI 数据未经审核声明和非商业许可');
     check((await evalJs('document.querySelector("a.grade-card").getAttribute("href")')) === 'explore/?grade=1', '一年级卡片指向知识图谱');
     const iqHome = await evalJs(IQ_HOME_EXPR);
     check(iqHome === 'ok', '首页儿童智商测试卡片（' + iqHome + '）');
@@ -956,7 +957,7 @@ async function main() {
         return btoa(binary);
       })()`);
       fs.writeFileSync(path.join(OUT, file), Buffer.from(b64, 'base64'));
-      console.log('  分享图 screenshots/' + file);
+      console.log('  分享图 ' + path.join(OUT, file));
     };
     const assertSharePng = (file) => {
       const img = pngRgba(path.join(OUT, file));
@@ -1019,6 +1020,62 @@ async function main() {
     await checkPage('英语分享弹层 375');
     await setView(1280, 900);
 
+    console.log('平板、搜索筛选、物理与本机档案');
+    for (const width of [768, 1024]) {
+      await setView(width, 1024);
+      await goto(BASE + '/');
+      await waitFor(() => evalJs('document.getElementById("n-topics").textContent === ' + JSON.stringify(N_TOPICS)), '平板首页');
+      await checkPage('首页 ' + width);
+      await shot('tablet-home-' + width + '.png', null, 1024);
+      await goto(BASE + '/explore/?grade=9#cnm_221');
+      await waitFor(() => exists('#list .topic-item'), '平板图谱');
+      if (width < 901) await click('#list-toggle');
+      await evalJs('document.getElementById("q").value = "配方法"; document.getElementById("q").dispatchEvent(new Event("input"))');
+      const searchHits = await evalJs('Array.from(document.querySelectorAll("#list .topic-item")).map(e => e.dataset.jump)');
+      check(searchHits.includes('cnm_221') && searchHits.length < TOPIC_ROWS.filter(t => t.grade === 9 && t.id.startsWith('cnm_')).length, '图谱 ' + width + ' 搜索配方法包含对应知识点并缩小结果（' + searchHits.length + ' 项）');
+      await evalJs('document.getElementById("fGrade").value = "1"; document.getElementById("fGrade").dispatchEvent(new Event("change"))');
+      check((await evalJs('document.querySelectorAll("#list .topic-item").length')) === 0, '图谱 ' + width + ' 搜索与年级筛选共同生效');
+      await evalJs('document.getElementById("q").value = ""; document.getElementById("q").dispatchEvent(new Event("input")); document.getElementById("fDomain").value = "图形与几何"; document.getElementById("fDomain").dispatchEvent(new Event("change"))');
+      const items = await evalJs('Array.from(document.querySelectorAll("#list .topic-item")).map(e => e.dataset.jump)');
+      check(items.length > 0 && items.every(id => TOPIC_ROWS.find(t => t.id === id).grade === 1 && TOPIC_ROWS.find(t => t.id === id).domain === '图形与几何'), '图谱 ' + width + ' 领域筛选结果正确');
+      await checkPage('图谱筛选 ' + width);
+      await shot('tablet-explore-' + width + '.png', null, 1024);
+      await goto(BASE + '/diagnose/?target=cnm_221&demo=1');
+      await waitFor(() => exists('#btn-share'), '平板诊断结果');
+      await checkPage('诊断结果 ' + width);
+      await click('#btn-share');
+      await waitFor(() => exists('#share-preview'), '平板分享');
+      await checkPage('分享弹层 ' + width);
+      await shot('tablet-share-' + width + '.png', null, 1024, { beyond: false });
+    }
+
+    await setView(375, 812);
+    await goto(BASE + '/?subject=physics');
+    await waitFor(() => evalJs('document.getElementById("n-topics").textContent === "92"'), '物理首页统计');
+    check((await evalJs('document.getElementById("n-questions").textContent')) === '368', '物理首页统计题量正确');
+    await checkPage('物理首页 375');
+    await goto(BASE + '/#cnp_001');
+    await waitFor(() => evalJs('location.search.includes("subject=physics") && document.querySelector(".id-code")?.textContent === "cnp_001"'), '物理旧哈希深层链接');
+    check(true, '根路径物理编号转到正确学科和知识点');
+    await checkPage('物理图谱 375');
+    await goto(BASE + '/diagnose/?subject=physics&target=cnp_001&demo=1');
+    await waitFor(() => exists('#btn-share'), '物理诊断结果');
+    await click('#btn-share');
+    await saveShareImage('share-physics.png');
+    assertSharePng('share-physics.png');
+    await checkPage('物理分享 375');
+
+    await goto(BASE + '/children/');
+    await waitFor(() => exists('#f-grade option[value="一年级"]'), '档案表单');
+    await evalJs('document.getElementById("f-name").value = "测试档案"; document.getElementById("f-grade").value = "一年级"; document.getElementById("form").requestSubmit()');
+    await waitFor(() => evalJs('window.CnmChildren.list().some(c => c.name === "测试档案")'), '创建本机测试档案');
+    await goto(BASE + '/children/');
+    check((await evalJs('window.CnmChildren.current().name')) === '测试档案', '刷新后本机档案保留');
+    await checkPage('本机档案 375');
+    await goto(BASE + '/children/history.html');
+    await waitFor(() => evalJs('document.getElementById("content").textContent !== "加载中……"'), '本机历史页面');
+    await checkPage('历史记录深层链接 375');
+
     check(externalReqs.length === 0, '运行时没有页面发起的外网资源请求' + (externalReqs.length ? '：\n       ' + externalReqs.slice(0, 8).join('\n       ') : ''));
     check(errors.length === 0, 'console / 网络无错误' + (errors.length ? '：\n       ' + errors.join('\n       ') : ''));
     if (checks.some((c) => !c[0])) exitCode = 1;
@@ -1030,7 +1087,8 @@ async function main() {
     exitCode = 1;
   } finally {
     chrome.kill('SIGKILL');
-    server.kill('SIGKILL');
+    if (server) server.kill('SIGKILL');
+    fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify({ base: BASE, siteRoot: SITE_ROOT, passed: exitCode === 0, checks, errors, externalReqs }, null, 2) + '\n');
     try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e) { /* ignore */ }
   }
   console.log(exitCode ? '\n冒烟测试未通过' : '\n冒烟测试通过（' + checks.length + ' 项）');
@@ -1046,7 +1104,7 @@ function noteExternal(params, bucket) {
   if (!url || !/^https?:/i.test(url)) return;
   let host = '';
   try { host = new URL(url).hostname; } catch (e) { return; }
-  if (host === '127.0.0.1' || host === 'localhost') return;
+  if (new URL(url).origin === new URL(BASE).origin) return;
   const type = params.type || '';
   if (['Script', 'Stylesheet', 'Image', 'Font', 'XHR', 'Fetch', 'Document', 'Other'].indexOf(type) < 0) return;
   const line = type + ' ' + initiator + ' ' + url;
@@ -1059,7 +1117,7 @@ const LOCAL_ASSET_EXPR = `(() => {
     if (!raw || raw.indexOf('data:') === 0 || raw.indexOf('blob:') === 0 || raw.charAt(0) === '#') return true;
     try {
       const u = new URL(raw, location.href);
-      return u.protocol === 'data:' || u.protocol === 'blob:' || u.hostname === '127.0.0.1' || u.hostname === 'localhost';
+      return u.protocol === 'data:' || u.protocol === 'blob:' || u.origin === location.origin;
     } catch (e) { return false; }
   };
   document.querySelectorAll('script[src], link[href], img[src], iframe[src], video[src], audio[src], source[src]').forEach((el) => {

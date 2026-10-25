@@ -459,6 +459,29 @@ python3 -m http.server 8000
 3. 用真实学生答题数据校准诊断题与先修强度。
 
 
+## 部署（Vercel）
+
+沿用当前静态应用，不需要安装 npm 依赖、数据库或环境凭证。在 Vercel 导入本仓库后使用根目录，框架预设为 **Other**；仓库的 `vercel.json` 已指定空安装命令、构建命令 `node scripts/build-static.js` 和输出目录 `dist`。默认使用项目的 `vercel.app` 域名即可。
+
+构建脚本只将五个运行数据文件、页面、静态资源和许可证复制到 `dist/`，不会发布截图、出题批次、校验报告或开发脚本。`version.json` 记录构建提交，线上可读取该文件与部署详情核对版本。分享图二维码自动使用当前站点的域名和部署目录，无需手改生产域名。
+
+```bash
+node tests/test_share.js
+node tests/test_service_worker.js
+node tests/test_build.js        # 同时生成 dist/
+python3 -m http.server 8000 --directory dist
+```
+
+页面保留原作者署名、CC BY-NC 4.0 许可和「AI 生成、未经教师审核」声明。档案与进度仍保存在当前浏览器，发布到新域名不会迁移旧域名的本机记录。
+
+验证发布包与不同屏幕尺寸（需要本机 Chrome/Chromium）：
+
+```bash
+SITE_ROOT=dist SCREENSHOT_DIR=/tmp/cnm-qa node scripts/screenshot.js
+# 部署后用同一组检查验证真实地址：
+BASE_URL=https://你的站点.vercel.app SCREENSHOT_DIR=/tmp/cnm-online-qa node scripts/screenshot.js
+```
+
 ## 部署（Cloudflare Pages）
 
 生产站点：https://math.pansgo.com/ （Pages 项目 `cn-math-taxonomy`，备用 https://cn-math-taxonomy.pages.dev/）。
